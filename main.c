@@ -4,7 +4,6 @@
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 #include <netinet/in.h>
-#include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -16,19 +15,22 @@ int BACKLOG = 64;
 const char *CERTIFICATE_FILE = "/etc/letsencrypt/live/chessbattles.net/cert.pem";
 const char *KEY_FILE = "/etc/letsencrypt/live/chessbattles.net/privkey.pem";
 
-static volatile bool terminated = false;
+volatile int terminated = 0;
 
 static void die(const char *error) {
   printf("FATAL: %s\n", error);
+  fflush(stdout);
   exit(EXIT_FAILURE);
 }
 
 static void warn(const char *warning) {
   printf("WARNING: %s\n", warning);
+  fflush(stdout);
 }
 
 static void info(const char *message) {
   printf("INFO: %s\n", message);
+  fflush(stdout);
 }
 
 SSL_CTX * init_server_tls() {
@@ -54,7 +56,7 @@ SSL_CTX * init_server_tls() {
   return context;
 }
 
-static int open_server_socket() {
+int open_server_socket() {
 
   // Create socket
   int fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
@@ -88,7 +90,7 @@ static int open_server_socket() {
 
 void interrupt_handler(int signal) {
   info("Received interrupt, shutting down server");
-  terminated = true;
+  terminated = 1;
 }
 
 int main() {
