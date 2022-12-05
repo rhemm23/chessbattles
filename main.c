@@ -98,7 +98,7 @@ int open_server_socket() {
 
 void interrupt_handler(int signal) {
   info("Received interrupt, shutting down server");
-  terminated = 1;
+  exit(EXIT_SUCCESS);
 }
 
 void show_usage_and_quit() {
@@ -138,7 +138,7 @@ int main(int argc, char **argv) {
         
         case 'p':
           numeric_value = strtol(argv[++i], &parse_end, 10);
-          if (parse_end != NULL || numeric_value < 0 || numeric_value > 65535) {
+          if (*parse_end != '\0' || numeric_value < 0 || numeric_value > 65535) {
             show_usage_and_quit();
           } else {
             port = (unsigned short)numeric_value;
@@ -147,7 +147,7 @@ int main(int argc, char **argv) {
 
         case 'b':
           numeric_value = strtol(argv[++i], &parse_end, 10);
-          if (parse_end != NULL || numeric_value < 0 || numeric_value > 4294967295L) {
+          if (*parse_end != '\0' || numeric_value < 0 || numeric_value > 4294967295L) {
             show_usage_and_quit();
           } else {
             backlog = (unsigned int)numeric_value;
@@ -161,7 +161,7 @@ int main(int argc, char **argv) {
   }
 
   if ((cert_file == NULL && key_file != NULL) || (cert_file != NULL && key_file == NULL)) {
-    printf("One of the server certificate file or private key file was specified, but the other was not. \nSpecify both to use TLS, or neither to ignore TLS");
+    printf("\nOne of the server certificate file or private key file was specified, but the other was not. \nSpecify both to use TLS, or neither to ignore TLS\n\n");
     exit(EXIT_FAILURE);
   }
 
