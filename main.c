@@ -1,4 +1,8 @@
+#include <signal.h>
 #include <sys/socket.h>
+#include <arpa/inet.h>
+#include <openssl/ssl.h>
+#include <openssl/err.h>
 #include <netinet/in.h>
 #include <stdlib.h>
 #include <string.h>
@@ -7,6 +11,9 @@
 
 short PORT = 80;
 int BACKLOG = 64;
+
+const char *CERTIFICATE_FILE = "/etc/letsencrypt/live/chessbattles.net/cert.pem";
+const char *KEY_FILE = "/etc/letsencrypt/live/chessbattles.net/privkey.pem";
 
 static void die(const char *error) {
   printf("FATAL: %s\n", error);
@@ -19,6 +26,29 @@ static void warn(const char *warning) {
 
 static void info(const char *message) {
   printf("INFO: %s\n", message);
+}
+
+SSL_CTX * init_server_tls() {
+
+  OpenSSL_add_all_algorithms();
+
+  const SSL_METHOD *method = TLS_server_method();
+  SSL_CTX *context = SSL_CTX_new(method);
+
+  if (context == NULL) {
+    die("Could not load TLS context");
+  }
+  if (SSL_CTX_use_certificate_file(context, CERTIFICATE_FILE, SSL_FILETYPE_PEM) < 1) {
+    die("Could not load server certificate");
+  }
+  if (SSL_CTX_use_PrivateKey_file(context, KEY_FILE, SSL_FILETYPE_PEM) < 1) {
+    die("Could not load server certificate private key");
+  }
+  if (!SSL_CTX_check_private_key(context)) {
+    die("Private key does not match with corresponding certificate");
+  }
+
+  return context;
 }
 
 int main() {
@@ -51,21 +81,33 @@ int main() {
     die("Could not listen on bound socket");
   }
 
+  SSL_CTX *tls = init_server_tls();
   info("Successfully started service");
 
   while (1) {
     int client;
+    SSL *ssl;
     socklen_t client_addr_len;
     struct sockaddr client_addr;
     if ((client = accept(fd, &client_addr, &client_addr_len)) < 0) {
       warn("Failed to accept incoming client");
     } else {
-      char *data = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 3\r\n\r\nHi!";
-      write(client, data, strlen(data));
-      shutdown(client, SHUT_RDWR);
+      ssl = SSL_new(tls);
+      SSL_set_fd(ssl, client);
+      if (SSL_accept(ssl) < 1) {
+        warn("Failed to accept client with TLS");
+      } else {
+        char *data = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 3\r\n\r\nHi!";
+        SSL_write(ssl, data, strlen(data));
+      }
+      SSL_shutdown(ssl);
+      SSL_free(ssl);
       close(client);
     }
   }
+
+  close(fd);
+  SSL_CTX_free(tls);
 
   return EXIT_SUCCESS;
 }
