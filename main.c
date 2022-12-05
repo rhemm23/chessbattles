@@ -35,11 +35,13 @@ static void info(const char *message) {
 
 SSL_CTX * init_server_tls() {
 
-  OpenSSL_add_all_algorithms();
-  ERR_load_BIO_strings();
-  SSL_load_error_strings();
+  uint64_t options =
+    OPENSSL_INIT_ADD_ALL_DIGESTS |
+    OPENSSL_INIT_ADD_ALL_CIPHERS |
+    OPENSSL_INIT_LOAD_SSL_STRINGS |
+    OPENSSL_INIT_LOAD_CRYPTO_STRINGS;
 
-  if (SSL_library_init() < 0) {
+  if (OPENSSL_init_ssl(options, NULL) < 0) {
     die("Could not initialize OpenSSL library");
   }
 
@@ -99,15 +101,84 @@ void interrupt_handler(int signal) {
   terminated = 1;
 }
 
-int main() {
+void show_usage_and_quit() {
+  printf("\nAllowed arguments:\n\n\t-c [cert file] - Specify the server certificate file path\n\t-k [key file]  - Specify the server private key file path\n\t-p [port]    - Specify the server port\n\t-b [backlog] - Specify the maximum connection backlog allowed\n\n");
+  exit(EXIT_FAILURE);
+}
+
+int main(int argc, char **argv) {
+
+  char *cert_file = NULL;
+  char *key_file = NULL;
+
+  unsigned int backlog = 32;
+  unsigned short port = 80;
+
+  // Parse command line arguments
+  for (int i = 1; i < argc; i++) {
+    if (argv[i][0] == '-' && strlen(argv[i]) == 2) {
+
+      // Assure value follows
+      if ((i + 1) == argc) {
+        show_usage_and_quit();
+      }
+
+      char *parse_end;
+      long numeric_value;
+
+      // Determine which command
+      switch (argv[i][1]) {
+        case 'c':
+          cert_file = argv[++i];
+          break;
+
+        case 'k':
+          key_file = argv[++i];
+          break;
+        
+        case 'p':
+          numeric_value = strtol(argv[++i], &parse_end, 10);
+          if (parse_end != NULL || numeric_value < 0 || numeric_value > 65535) {
+            show_usage_and_quit();
+          } else {
+            port = (unsigned short)numeric_value;
+          }
+          break;
+
+        case 'b':
+          numeric_value = strtol(argv[++i], &parse_end, 10);
+          if (parse_end != NULL || numeric_value < 0 || numeric_value > 4294967295L) {
+            show_usage_and_quit();
+          } else {
+            backlog = (unsigned int)numeric_value;
+          }
+          break;
+
+        default:
+          show_usage_and_quit();
+      }
+    }
+  }
+
+  if ((cert_file == NULL && key_file != NULL) || (cert_file != NULL && key_file == NULL)) {
+    printf("One of the server certificate file or private key file was specified, but the other was not. \nSpecify both to use TLS, or neither to ignore TLS");
+    exit(EXIT_FAILURE);
+  }
+
+  int use_tls = (cert_file != NULL && key_file != NULL);
 
   // Setup interrupt handler, ignore broken pipe
   signal(SIGPIPE, SIG_IGN);
   signal(SIGINT, interrupt_handler);
 
   // Load SSL context
-  SSL_CTX *ssl_context = init_server_tls();
-  info("Successfully initialized TLS context");
+  SSL_CTX *ssl_context = NULL;
+  if (use_tls) {
+    ssl_context = init_server_tls();
+    info("Successfully initialized TLS context");
+  } else {
+    info("No certificate specified, skipping TLS setup");
+  }
 
   // Open server socket
   int fd = open_server_socket();
@@ -121,23 +192,30 @@ int main() {
     if ((client = accept(fd, &client_addr, &client_addr_len)) < 0) {
       warn("Failed to accept incoming client");
     } else {
-      ssl = SSL_new(ssl_context);
-      SSL_set_fd(ssl, client);
-      if (SSL_accept(ssl) < 1) {
-        warn("Failed to accept client with TLS");
+      char *data = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 3\r\n\r\nHi!";
+      int len = strlen(data);
+      if (use_tls) {
+        ssl = SSL_new(ssl_context);
+        SSL_set_fd(ssl, client);
+        if (SSL_accept(ssl) < 1) {
+          warn("Failed to accept client with TLS");
+        } else {
+          SSL_write(ssl, data, len);
+        }
+        SSL_shutdown(ssl);
+        SSL_free(ssl);
       } else {
-        char *data = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 3\r\n\r\nHi!";
-        SSL_write(ssl, data, strlen(data));
+        write(client, data, len);
       }
-      SSL_shutdown(ssl);
-      SSL_free(ssl);
       close(client);
     }
   }
 
   // Graceful cleanup
   close(fd);
-  SSL_CTX_free(ssl_context);
+  if (use_tls) {
+    SSL_CTX_free(ssl_context);
+  }
 
   return EXIT_SUCCESS;
 }
