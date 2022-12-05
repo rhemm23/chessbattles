@@ -1,5 +1,6 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <fcntl.h>
 
 #include "sock.h"
 #include "log.h"
@@ -44,8 +45,16 @@ void start_listening(int socket, unsigned int backlog) {
   }
 }
 
+void set_socket_nonblocking(int socket) {
+  int flags = fcntl(socket, F_GETFL);
+  if (fcntl(socket, F_SETFL, flags | O_NONBLOCK) < 0) {
+    die("Could not set socket to be non-blocking");
+  }
+}
+
 int configure_server_socket(unsigned short port, unsigned int backlog) {
   int server_fd = create_tcp_socket();
+  set_socket_nonblocking(server_fd);
   set_reuse_port(server_fd);
   set_reuse_addr(server_fd);
   bind_to_port(server_fd, port);
