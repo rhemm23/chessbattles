@@ -16,6 +16,7 @@ static void write_message(const char *type, const char *message, va_list args) {
   printf("%s: ", type);
   vfprintf(stdout, message, args);
   printf("\n");
+  fflush(stdout);
 }
 
 static void die(const char *error, ...) {
