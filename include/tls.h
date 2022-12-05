@@ -3,6 +3,8 @@
 
 #include <openssl/ssl.h>
 
-SSL_CTX * init_server_ssl_context(char *cert_file, char *key_file);
+void close_server_ssl_context();
+SSL * move_client_to_ssl(int client_socket);
+void init_server_ssl_context(char *cert_file, char *key_file);
 
 #endif

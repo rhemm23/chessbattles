@@ -1,10 +1,22 @@
-build:
-	rm -f /home/ryanhemmila/testservice
-	gcc -o /home/ryanhemmila/testservice main.c tls.c log.c config.c -I./include/ -lssl -lcrypto
+INC=-I./include
+LNK=-lssl -lcrypto
+SRC=$(wildcard *.c)
 
-install:
-	systemctl stop testing
-	rm -f /home/ryanhemmila/testservice
-	gcc -o /home/ryanhemmila/testservice main.c tls.c log.c config.c -I./include/ -lssl -lcrypto
-	systemctl start testing
-	systemctl status testing
+BIN=bin/
+ISTL=/services/
+SERVICE=server
+
+bin/server: $(SRC)
+	mkdir -p $(BIN)
+	gcc -o $@ $(SRC) $(INC) $(LNK)
+
+install: bin/server
+	mkdir -p $(ISTL)
+	systemctl stop $(SERVICE)
+	rm -f $(ISTL)server
+	cp $^ $(ISTL)
+	systemctl start $(SERVICE)
+	systemctl status $(SERVICE)
+
+clean:
+	rm -rf $(BIN)

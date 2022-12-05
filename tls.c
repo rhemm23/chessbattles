@@ -1,7 +1,26 @@
 #include "tls.h"
 #include "log.h"
 
-SSL_CTX * init_server_ssl_context(char *cert_file, char *key_file) {
+SSL_CTX *server_ssl_context = NULL;
+
+SSL * move_client_to_ssl(int client_socket) {
+
+  SSL *ssl = SSL_new(server_ssl_context);
+  SSL_set_fd(ssl, client_socket);
+
+  if (SSL_accept(ssl) <= 0) {
+    SSL_free(ssl);
+    return NULL;
+  }
+
+  return ssl;
+}
+
+void close_server_ssl_context() {
+  SSL_CTX_free(server_ssl_context);
+}
+
+void init_server_ssl_context(char *cert_file, char *key_file) {
 
   uint64_t options =
     OPENSSL_INIT_ADD_ALL_DIGESTS |
@@ -14,20 +33,18 @@ SSL_CTX * init_server_ssl_context(char *cert_file, char *key_file) {
   }
 
   const SSL_METHOD *method = TLS_server_method();
-  SSL_CTX *context = SSL_CTX_new(method);
+  server_ssl_context = SSL_CTX_new(method);
 
-  if (context == NULL) {
+  if (server_ssl_context == NULL) {
     die("Could not load TLS context");
   }
-  if (SSL_CTX_use_certificate_file(context, cert_file, SSL_FILETYPE_PEM) < 1) {
+  if (SSL_CTX_use_certificate_file(server_ssl_context, cert_file, SSL_FILETYPE_PEM) < 1) {
     die("Could not load server certificate");
   }
-  if (SSL_CTX_use_PrivateKey_file(context, key_file, SSL_FILETYPE_PEM) < 1) {
+  if (SSL_CTX_use_PrivateKey_file(server_ssl_context, key_file, SSL_FILETYPE_PEM) < 1) {
     die("Could not load server certificate private key");
   }
-  if (!SSL_CTX_check_private_key(context)) {
+  if (!SSL_CTX_check_private_key(server_ssl_context)) {
     die("Private key does not match with corresponding certificate");
   }
-
-  return context;
 }
