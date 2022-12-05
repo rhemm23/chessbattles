@@ -8,32 +8,39 @@
 #include <string.h>
 #include <unistd.h>
 #include <stdio.h>
+#include <stdarg.h>
 
-short PORT = 443;
-int BACKLOG = 64;
+int server_fd = -1;
 
-const char *CERTIFICATE_FILE = "/etc/letsencrypt/live/chessbattles.net/cert.pem";
-const char *KEY_FILE = "/etc/letsencrypt/live/chessbattles.net/privkey.pem";
+static void write_message(const char *type, const char *message, va_list args) {
+  printf("%s: ", type);
+  vfprintf(stdout, message, args);
+  printf("\n");
+}
 
-volatile int terminated = 0;
-
-static void die(const char *error) {
-  printf("FATAL: %s\n", error);
-  fflush(stdout);
+static void die(const char *error, ...) {
+  va_list args;
+  va_start(args, error);
+  write_message("FATAL", error, args);
+  va_end(args);
   exit(EXIT_FAILURE);
 }
 
-static void warn(const char *warning) {
-  printf("WARNING: %s\n", warning);
-  fflush(stdout);
+static void warn(const char *warning, ...) {
+  va_list args;
+  va_start(args, warning);
+  write_message("WARNING", warning, args);
+  va_end(args);
 }
 
-static void info(const char *message) {
-  printf("INFO: %s\n", message);
-  fflush(stdout);
+static void info(const char *message, ...) {
+  va_list args;
+  va_start(args, message);
+  write_message("INFO", message, args);
+  va_end(args);
 }
 
-SSL_CTX * init_server_tls() {
+SSL_CTX * init_server_tls(char *cert_file, char *key_file) {
 
   uint64_t options =
     OPENSSL_INIT_ADD_ALL_DIGESTS |
@@ -51,10 +58,10 @@ SSL_CTX * init_server_tls() {
   if (context == NULL) {
     die("Could not load TLS context");
   }
-  if (SSL_CTX_use_certificate_file(context, CERTIFICATE_FILE, SSL_FILETYPE_PEM) < 1) {
+  if (SSL_CTX_use_certificate_file(context, cert_file, SSL_FILETYPE_PEM) < 1) {
     die("Could not load server certificate");
   }
-  if (SSL_CTX_use_PrivateKey_file(context, KEY_FILE, SSL_FILETYPE_PEM) < 1) {
+  if (SSL_CTX_use_PrivateKey_file(context, key_file, SSL_FILETYPE_PEM) < 1) {
     die("Could not load server certificate private key");
   }
   if (!SSL_CTX_check_private_key(context)) {
@@ -64,7 +71,7 @@ SSL_CTX * init_server_tls() {
   return context;
 }
 
-int open_server_socket() {
+int open_server_socket(unsigned short port, unsigned int backlog) {
 
   // Create socket
   int fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
@@ -84,12 +91,12 @@ int open_server_socket() {
   struct sockaddr_in addr;
   addr.sin_family = AF_INET;
   addr.sin_addr.s_addr = INADDR_ANY;
-  addr.sin_port = htons(PORT);
+  addr.sin_port = htons(port);
 
   if (bind(fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
     die("Could not bind socket");
   }
-  if (listen(fd, BACKLOG) < 0) {
+  if (listen(fd, backlog) < 0) {
     die("Could not listen on bound socket");
   }
 
@@ -174,22 +181,22 @@ int main(int argc, char **argv) {
   // Load SSL context
   SSL_CTX *ssl_context = NULL;
   if (use_tls) {
-    ssl_context = init_server_tls();
+    ssl_context = init_server_tls(cert_file, key_file);
     info("Successfully initialized TLS context");
   } else {
     info("No certificate specified, skipping TLS setup");
   }
 
   // Open server socket
-  int fd = open_server_socket();
-  info("Successfully opened server socket");
+  server_fd = open_server_socket(port, backlog);
+  info("Successfully created socket bound to port %hu", port);
 
-  while (!terminated) {
+  while (1) {
     int client;
     SSL *ssl;
     socklen_t client_addr_len;
     struct sockaddr client_addr;
-    if ((client = accept(fd, &client_addr, &client_addr_len)) < 0) {
+    if ((client = accept(server_fd, &client_addr, &client_addr_len)) < 0) {
       warn("Failed to accept incoming client");
     } else {
       char *data = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 3\r\n\r\nHi!";
@@ -212,7 +219,7 @@ int main(int argc, char **argv) {
   }
 
   // Graceful cleanup
-  close(fd);
+  close(server_fd);
   if (use_tls) {
     SSL_CTX_free(ssl_context);
   }
