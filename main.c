@@ -9,7 +9,7 @@
 #include <unistd.h>
 #include <stdio.h>
 
-short PORT = 80;
+short PORT = 443;
 int BACKLOG = 64;
 
 const char *CERTIFICATE_FILE = "/etc/letsencrypt/live/chessbattles.net/cert.pem";
@@ -36,6 +36,12 @@ static void info(const char *message) {
 SSL_CTX * init_server_tls() {
 
   OpenSSL_add_all_algorithms();
+  ERR_load_BIO_strings();
+  SSL_load_error_strings();
+
+  if (SSL_library_init() < 0) {
+    die("Could not initialize OpenSSL library");
+  }
 
   const SSL_METHOD *method = TLS_server_method();
   SSL_CTX *context = SSL_CTX_new(method);
@@ -95,7 +101,8 @@ void interrupt_handler(int signal) {
 
 int main() {
 
-  // Setup interrupt handler
+  // Setup interrupt handler, ignore broken pipe
+  signal(SIGPIPE, SIG_IGN);
   signal(SIGINT, interrupt_handler);
 
   // Load SSL context
