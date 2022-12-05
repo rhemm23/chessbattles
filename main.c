@@ -4,6 +4,7 @@
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 #include <netinet/in.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -14,6 +15,8 @@ int BACKLOG = 64;
 
 const char *CERTIFICATE_FILE = "/etc/letsencrypt/live/chessbattles.net/cert.pem";
 const char *KEY_FILE = "/etc/letsencrypt/live/chessbattles.net/privkey.pem";
+
+static volatile bool terminated = false;
 
 static void die(const char *error) {
   printf("FATAL: %s\n", error);
@@ -51,7 +54,7 @@ SSL_CTX * init_server_tls() {
   return context;
 }
 
-int main() {
+static int open_server_socket() {
 
   // Create socket
   int fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
@@ -70,7 +73,6 @@ int main() {
 
   struct sockaddr_in addr;
   addr.sin_family = AF_INET;
-  addr.sin_len = sizeof(addr);
   addr.sin_addr.s_addr = INADDR_ANY;
   addr.sin_port = htons(PORT);
 
@@ -81,10 +83,28 @@ int main() {
     die("Could not listen on bound socket");
   }
 
-  SSL_CTX *tls = init_server_tls();
-  info("Successfully started service");
+  return fd;
+}
 
-  while (1) {
+void interrupt_handler(int signal) {
+  info("Received interrupt, shutting down server");
+  terminated = true;
+}
+
+int main() {
+
+  // Setup interrupt handler
+  signal(SIGINT, interrupt_handler);
+
+  // Load SSL context
+  SSL_CTX *ssl_context = init_server_tls();
+  info("Successfully initialized TLS context");
+
+  // Open server socket
+  int fd = open_server_socket();
+  info("Successfully opened server socket");
+
+  while (!terminated) {
     int client;
     SSL *ssl;
     socklen_t client_addr_len;
@@ -92,7 +112,7 @@ int main() {
     if ((client = accept(fd, &client_addr, &client_addr_len)) < 0) {
       warn("Failed to accept incoming client");
     } else {
-      ssl = SSL_new(tls);
+      ssl = SSL_new(ssl_context);
       SSL_set_fd(ssl, client);
       if (SSL_accept(ssl) < 1) {
         warn("Failed to accept client with TLS");
@@ -106,8 +126,9 @@ int main() {
     }
   }
 
+  // Graceful cleanup
   close(fd);
-  SSL_CTX_free(tls);
+  SSL_CTX_free(ssl_context);
 
   return EXIT_SUCCESS;
 }
